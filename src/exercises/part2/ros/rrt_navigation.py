@@ -55,11 +55,13 @@ def feedback_linearized(pose, velocity, epsilon):
 
 
 def get_velocity(position, path_points):
+  print(len(path_points))
   v = np.zeros_like(position)
   if len(path_points) == 0:
     return v
   # Stop moving if the goal is reached.
-  if np.linalg.norm(position - path_points[-1]) < .2:
+  if np.linalg.norm(position - path_points[-1]) < 0.05:
+    print("stop")
     return v
 
   # MISSING: Return the velocity needed to follow the
@@ -70,13 +72,24 @@ def get_velocity(position, path_points):
   min_dist = -1
   for point in range(0, len(path_points)):
     distance = np.linalg.norm(path_points[point]-position)
+    print(distance)
     if distance < min_dist or min_dist == -1:
       i = point
       min_dist = distance
 
-  vec_to_next = path_points[i+1] - position
+  print(min_dist)
 
-  return vec_to_next * 0.3
+  vec_to_next = path_points[i+1] - position
+  vec_to_next = vec_to_next / np.linalg.norm(vec_to_next)
+
+  return cap(vec_to_next*(1./min_dist)*3, max_speed=SPEED)
+
+
+def cap(v, max_speed):
+    n = np.linalg.norm(v)
+    if n > max_speed:
+        return v / n * max_speed
+    return v
 
 
 class SLAM(object):

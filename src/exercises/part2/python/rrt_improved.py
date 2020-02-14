@@ -42,6 +42,15 @@ def rotate(vector, rads):
   return np.dot(np.array([[c, -s], [s, c]]), vector)
 
 
+def get_length(node, final):
+  centre, r = find_circle(node, final)
+
+  a = node.position - centre
+  b = final.position - centre
+  angle = angle_between(a, b)
+  return angle * r
+
+
 def sample_random_position(occupancy_grid):
   position = np.zeros(2, dtype=np.float32)
 
@@ -94,6 +103,8 @@ def adjust_pose(node, final_position, occupancy_grid):
   if step_along(occupancy_grid, node, final_node):
     print("REJECT")
     return None
+  
+  final_node.cost = node.cost + get_length(node, final_node)
 
   return final_node
 
@@ -203,41 +214,78 @@ class Node(object):
 
 
 def rrt(start_pose, goal_position, occupancy_grid):
-  # RRT builds a graph one node at a time.
-  graph = []
-  start_node = Node(start_pose)
-  final_node = None
-  if not occupancy_grid.is_free(goal_position):
-    print('Goal position is not in the free space.')
+    # RRT builds a graph one node at a time.
+    graph = []
+    start_node = Node(start_pose)
+    final_node = None
+    if not occupancy_grid.is_free(goal_position):
+        print('Goal position is not in the free space.')
+        return start_node, final_node
+    graph.append(start_node)
+
+    for _ in range(MAX_ITERATIONS):
+        position = sample_random_position(occupancy_grid)
+
+        # With a random chance, draw the goal position.
+        if np.random.rand() < .05:
+            position = goal_position
+
+        # Find closest lowest cost node in graph.
+        # In practice, one uses an efficient spatial structure (e.g., quadtree).
+        potential_parent = sorted(
+            ((n, np.linalg.norm(position - n.position)) for n in graph), key=lambda x: x[1])
+
+        neighbourhood = []
+        for node in graph:
+          d = np.linalg.norm(position - node.position)
+          dot  = node.direction.dot(position - node.position)
+          if d < 2. and (dot/d) > 0.70710678118:
+            neighbourhood.append(node)
+
+        # Pick a node at least some distance away but not too far.
+        # We also verify that the angles are aligned (within pi / 4).
+        u = None
+        for n, d in potential_parent:
+            if d > .2 and d < 0.8 and n.direction.dot(position - n.position) / d > 0.70710678118:
+                u = n
+                break
+        else:
+            continue
+
+        v = adjust_pose(u, position, occupancy_grid)
+        if v is None:
+            continue
+
+        # find lowest cost from neighbours
+        for node in neighbourhood:
+            new_vec = adjust_pose(node, position, occupancy_grid)
+            if new_vec is None:
+                continue
+            if new_vec.cost < v.cost:
+                v = new_vec
+                u = node
+                print('Cheaper found')
+
+        u.add_neighbor(v)
+        v.parent = u
+        graph.append(v)
+
+        # rewire
+        for node in neighbourhood:
+            new_vec = adjust_pose(node, position, occupancy_grid)
+            if new_vec is not None:
+                if (node.cost > new_vec.cost + get_length(node, new_vec)):
+                    new_vec.add_neighbor(node)
+                    node.parent.neighbors.remove(node)
+                    node.parent = new_vec
+                    node.cost = new_vec.cost + get_length(new_vec, node)
+            else:
+                continue
+
+        if np.linalg.norm(v.position - goal_position) < .2:
+            final_node = v
+            break
     return start_node, final_node
-  graph.append(start_node)
-  for _ in range(MAX_ITERATIONS): 
-    position = sample_random_position(occupancy_grid)
-    # With a random chance, draw the goal position.
-    if np.random.rand() < .05:
-      position = goal_position
-    # Find closest node in graph.
-    # In practice, one uses an efficient spatial structure (e.g., quadtree).
-    potential_parent = sorted(((n, np.linalg.norm(position - n.position)) for n in graph), key=lambda x: x[1])
-    # Pick a node at least some distance away but not too far.
-    # We also verify that the angles are aligned (within pi / 4).
-    u = None
-    for n, d in potential_parent:
-      if d > .2 and d < 1.5 and n.direction.dot(position - n.position) / d > 0.70710678118:
-        u = n
-        break
-    else:
-      continue
-    v = adjust_pose(u, position, occupancy_grid)
-    if v is None:
-      continue
-    u.add_neighbor(v)
-    v.parent = u
-    graph.append(v)
-    if np.linalg.norm(v.position - goal_position) < .2:
-      final_node = v
-      break
-  return start_node, final_node
 
 
 def find_circle(node_a, node_b):
